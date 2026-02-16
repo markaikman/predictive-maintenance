@@ -3,12 +3,14 @@ import numpy as np
 
 from .schemas import PredictRequest, PredictResponse
 from .settings import settings
-from .model_loader import load_model
+from .model_loader import load_model_bundle
 from .db import log_prediction
 
 app = FastAPI(title="Predictive Maintenance API")
 
-model = load_model(settings.model_path)
+bundle = load_model_bundle(settings.model_path)
+model = bundle["model"]
+feature_names = bundle["feature_names"]
 
 
 @app.get("/health")
@@ -18,9 +20,19 @@ def health():
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
-    # Stable feature ordering
-    keys = sorted(req.features.keys())
-    x = np.array([[req.features[k] for k in keys]], dtype=float)
+    if feature_names:
+        missing = [f for f in feature_names if f not in req.features]
+        if missing:
+            # FastAPI will return 422 if we raise properly; keep simple for now
+            return PredictResponse(
+                engine_id=req.engine_id,
+                prediction=float("nan"),
+                model_version=settings.model_version,
+            )
+        x = np.array([[req.features[f] for f in feature_names]], dtype=float)
+    else:
+        keys = sorted(req.features.keys())
+        x = np.array([[req.features[k] for k in keys]], dtype=float)
 
     y = float(model.predict(x)[0])
 

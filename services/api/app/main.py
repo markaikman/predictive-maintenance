@@ -34,3 +34,15 @@ def predict(req: PredictRequest):
     return PredictResponse(
         engine_id=req.engine_id, prediction=y, model_version=settings.model_version
     )
+
+
+@app.get("/health/db")
+def health_db():
+    # Simple write/read test
+    from sqlalchemy import text
+    from .db import get_engine
+
+    eng = get_engine()
+    with eng.begin() as conn:
+        conn.execute(text("SELECT 1"))
+    return {"db": "ok"}

@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import os
 import joblib
+import json
 import numpy as np
 import pandas as pd
 from sqlalchemy import create_engine
@@ -123,6 +124,23 @@ def main() -> None:
     X_val = val_df[feature_cols].to_numpy(dtype=float)
     y_val = val_df["RUL"].to_numpy(dtype=float)
 
+    # Baseline stats for drift monitoring (training distribution)
+    baseline = {}
+    X_train_df = pd.DataFrame(X_train, columns=feature_cols)
+
+    for c in feature_cols:
+        s = X_train_df[c].astype(float)
+        # Robust percentiles to build bins later
+        baseline[c] = {
+            "p05": float(s.quantile(0.05)),
+            "p25": float(s.quantile(0.25)),
+            "p50": float(s.quantile(0.50)),
+            "p75": float(s.quantile(0.75)),
+            "p95": float(s.quantile(0.95)),
+            "mean": float(s.mean()),
+            "std": float(s.std(ddof=0)),
+        }
+
     model = RandomForestRegressor(
         n_estimators=300, random_state=42, n_jobs=-1, max_depth=None
     )
@@ -153,6 +171,20 @@ def main() -> None:
         artifacts_dir.mkdir(parents=True, exist_ok=True)
         out_path = artifacts_dir / "model.pkl"
         joblib.dump(bundle, out_path)
+        stats_path = artifacts_dir / "baseline_stats.json"
+        with open(stats_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "dataset": "FD001",
+                    "rolling_window": 10,
+                    "feature_names": feature_cols,
+                    "baseline": baseline,
+                },
+                f,
+                indent=2,
+            )
+
+        mlflow.log_artifact(str(stats_path), artifact_path="model")
 
         mlflow.log_artifact(str(out_path), artifact_path="model")
 

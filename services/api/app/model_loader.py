@@ -23,3 +23,13 @@ def load_model_bundle(model_path: str) -> dict[str, Any]:
             # Fall back so the API still runs
             return {"model": DummyModel(), "feature_names": None}
     return {"model": DummyModel(), "feature_names": None}
+
+
+def load_bundle_from_path(path: str) -> dict:
+    p = Path(path)
+    if not p.exists():
+        return {"model": DummyModel(), "feature_names": None}
+    obj = joblib.load(p)
+    if isinstance(obj, dict) and "model" in obj and "feature_names" in obj:
+        return obj
+    return {"model": obj, "feature_names": None}

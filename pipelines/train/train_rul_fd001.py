@@ -6,7 +6,7 @@ import joblib
 import json
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import mlflow
@@ -77,6 +77,42 @@ def build_features(
 
     feature_cols = [c for c in out.columns if c not in ("engine_id", "cycle")]
     return out, feature_cols
+
+
+def register_model(
+    run_id: str,
+    artifact_path: str,
+    stage: str = "dev",
+    name: str = "cmapss_fd001_rul",
+    notes: str | None = None,
+):
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        raise ValueError("DATABASE_URL env var required to register model")
+    eng = create_engine(db_url)
+
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE model_registry SET is_active = FALSE WHERE name = :name AND stage = :stage AND is_active = TRUE"
+            ),
+            {"name": name, "stage": stage},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO model_registry (name, stage, run_id, artifact_path, notes, is_active)
+                VALUES (:name, :stage, :run_id, :artifact_path, :notes, TRUE)
+            """
+            ),
+            {
+                "name": name,
+                "stage": stage,
+                "run_id": run_id,
+                "artifact_path": artifact_path,
+                "notes": notes,
+            },
+        )
 
 
 def train_val_split_by_engine(
@@ -152,6 +188,9 @@ def main() -> None:
         mlflow.log_param("rolling_window", 10)
         mlflow.log_param("val_frac_by_engine", 0.2)
 
+        run_id = mlflow.active_run().info.run_id
+
+        # 1) Train + evaluate first
         model.fit(X_train, y_train)
         pred = model.predict(X_val)
 
@@ -164,13 +203,23 @@ def main() -> None:
         mlflow.log_metric("RMSE", rmse)
         mlflow.log_metric("R2", r2)
 
-        # Save bundle for API: includes feature order
+        # 2) Now build the bundle (model exists + feature order fixed)
         bundle = {"model": model, "feature_names": feature_cols}
 
         artifacts_dir = repo_root / "artifacts" / "models"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
-        out_path = artifacts_dir / "model.pkl"
-        joblib.dump(bundle, out_path)
+
+        # 3) Save dev bundle (optional convenience)
+        dev_path = artifacts_dir / "model.pkl"
+        joblib.dump(bundle, dev_path)
+
+        # 4) Save run-specific bundle for promotion
+        runs_dir = artifacts_dir / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        run_bundle_path = runs_dir / f"{run_id}.pkl"
+        joblib.dump(bundle, run_bundle_path)
+
+        # 5) Save baseline stats next to the model artifacts
         stats_path = artifacts_dir / "baseline_stats.json"
         with open(stats_path, "w", encoding="utf-8") as f:
             json.dump(
@@ -179,18 +228,30 @@ def main() -> None:
                     "rolling_window": 10,
                     "feature_names": feature_cols,
                     "baseline": baseline,
+                    "run_id": run_id,
                 },
                 f,
                 indent=2,
             )
 
+        # 6) Log artifacts to MLflow
+        mlflow.log_artifact(str(run_bundle_path), artifact_path="model_bundle")
         mlflow.log_artifact(str(stats_path), artifact_path="model")
 
-        mlflow.log_artifact(str(out_path), artifact_path="model")
+        # 7) Register in Postgres as active DEV using a container-visible path
+        # IMPORTANT: store /artifacts/... not a Windows path
+        register_model(
+            run_id=run_id,
+            artifact_path=f"/artifacts/models/runs/{run_id}.pkl",
+            stage="dev",
+            name="cmapss_fd001_rul",
+            notes="RF baseline rm10",
+        )
 
-        print("Saved model bundle to:", out_path)
-        print(f"Val MAE={mae:.3f} RMSE={rmse:.3f} R2={r2:.3f}")
-        print("MLflow Tracking URI:", mlflow_uri)
+    print("Saved dev bundle to:", dev_path)
+    print("Saved run bundle to:", run_bundle_path)
+    print(f"Val MAE={mae:.3f} RMSE={rmse:.3f} R2={r2:.3f}")
+    print("MLflow Tracking URI:", mlflow_uri)
 
 
 if __name__ == "__main__":

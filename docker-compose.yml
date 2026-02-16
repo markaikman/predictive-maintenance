@@ -52,6 +52,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MODEL_PATH: ${MODEL_PATH}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
 
   ui:
     build: ./services/ui

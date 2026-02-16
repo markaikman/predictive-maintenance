@@ -2,8 +2,18 @@ import streamlit as st
 import pandas as pd
 from api_client import predict
 
+import requests
+import os
+
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+
 st.set_page_config(page_title="Predictive Maintenance Demo", layout="wide")
 st.title("Predictive Maintenance — Demo Dashboard")
+
+with st.sidebar:
+    if st.button("Test API"):
+        r = requests.get(f"{API_BASE_URL}/health", timeout=5)
+        st.write(r.json())
 
 with st.sidebar:
     st.header("Input")

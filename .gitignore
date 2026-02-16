@@ -29,3 +29,6 @@ artifacts/models/
 
 # Docker
 *.log
+
+# Data
+data/

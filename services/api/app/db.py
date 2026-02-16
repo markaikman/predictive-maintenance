@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from .settings import settings
+import json
 
 _engine: Engine | None = None
 
@@ -21,13 +22,13 @@ def log_prediction(
             text(
                 """
                 INSERT INTO prediction_logs (engine_id, model_version, prediction, features)
-                VALUES (:engine_id, :model_version, :prediction, :features::jsonb)
+                VALUES (:engine_id, :model_version, :prediction, CAST(:features AS jsonb))
             """
             ),
             {
                 "engine_id": engine_id,
                 "model_version": model_version,
                 "prediction": float(prediction),
-                "features": __import__("json").dumps(features),
+                "features": json.dumps(features),
             },
         )

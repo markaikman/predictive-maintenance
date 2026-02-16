@@ -15,6 +15,7 @@ venv/
 
 # VS Code
 .vscode/
+*.code-workspace
 
 # MLflow artifacts
 artifacts/mlruns/

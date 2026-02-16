@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ds_postgres
+    env_file: .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.14.3
+    container_name: ds_mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    ports:
+      - "${MLFLOW_PORT}:5000"
+    volumes:
+      - ./artifacts/mlruns:/mlflow/artifacts
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri ${MLFLOW_BACKEND_STORE_URI}
+      --default-artifact-root ${MLFLOW_ARTIFACT_ROOT}
+
+  api:
+    build: ./services/api
+    container_name: ds_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+    env_file: .env
+    ports:
+      - "${API_PORT}:8000"
+    volumes:
+      - ./artifacts:/artifacts
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MODEL_PATH: ${MODEL_PATH}
+
+  ui:
+    build: ./services/ui
+    container_name: ds_ui
+    depends_on:
+      - api
+    env_file: .env
+    ports:
+      - "${UI_PORT}:8501"
+    environment:
+      API_BASE_URL: http://api:8000
+
+volumes:
+  postgres_data:

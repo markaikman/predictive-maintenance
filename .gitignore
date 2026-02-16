@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# VS Code
+.vscode/
+
+# MLflow artifacts
+artifacts/mlruns/
+
+# Local model artifacts
+artifacts/models/
+
+# Environment files
+.env
+
+# Docker
+*.log

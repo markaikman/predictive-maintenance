@@ -8,6 +8,7 @@ from .model_loader import load_model_bundle
 from .db import log_prediction, get_engine
 from .cmapss import list_engines, get_engine_series
 from .features import build_features_for_engine
+from .monitoring import get_recent_prediction_logs, compute_feature_drift_psi
 
 app = FastAPI(title="Predictive Maintenance API")
 
@@ -27,6 +28,17 @@ def engines():
         return {"engines": list_engines()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/monitoring/predictions")
+def monitoring_predictions(limit: int = 1000):
+    df = get_recent_prediction_logs(limit=limit)
+    return {"rows": df.to_dict(orient="records")}
+
+
+@app.get("/monitoring/feature-drift")
+def monitoring_feature_drift(limit: int = 1000):
+    return compute_feature_drift_psi(limit=limit)
 
 
 @app.get("/engines/{engine_id}/series")

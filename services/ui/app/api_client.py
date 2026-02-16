@@ -27,3 +27,19 @@ def predict_latest(engine_id: int, window: int = 10) -> dict:
     )
     r.raise_for_status()
     return r.json()
+
+
+def get_prediction_logs(limit: int = 1000) -> list[dict]:
+    r = requests.get(
+        f"{API_BASE_URL}/monitoring/predictions", params={"limit": limit}, timeout=20
+    )
+    r.raise_for_status()
+    return r.json()["rows"]
+
+
+def get_feature_drift(limit: int = 1000) -> dict:
+    r = requests.get(
+        f"{API_BASE_URL}/monitoring/feature-drift", params={"limit": limit}, timeout=30
+    )
+    r.raise_for_status()
+    return r.json()

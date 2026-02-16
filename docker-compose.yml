@@ -19,7 +19,7 @@ services:
       retries: 20
 
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.14.3
+    build: ./services/mlflow
     container_name: ds_mlflow
     depends_on:
       postgres:

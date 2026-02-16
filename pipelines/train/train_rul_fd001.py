@@ -5,6 +5,7 @@ import os
 import joblib
 import numpy as np
 import pandas as pd
+from sqlalchemy import create_engine
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import mlflow
@@ -28,6 +29,17 @@ def load_cmapss_txt(path: Path) -> pd.DataFrame:
         )
     df.columns = cols
     return df
+
+
+def write_train_to_postgres(
+    raw: pd.DataFrame, table: str = "cmapss_fd001_train"
+) -> None:
+    db_url = os.getenv(
+        "DATABASE_URL", "postgresql+psycopg2://dsuser:dsdevpass123@localhost:5432/dsdb"
+    )
+    eng = create_engine(db_url)
+    # replace on first run; later you can switch to "append" with upsert
+    raw.to_sql(table, eng, if_exists="replace", index=False)
 
 
 def add_rul_label(train_df: pd.DataFrame) -> pd.DataFrame:
@@ -96,6 +108,7 @@ def main() -> None:
 
     # Load + label
     raw = load_cmapss_txt(train_path)
+    write_train_to_postgres(raw)
     labeled = add_rul_label(raw)
 
     # Features

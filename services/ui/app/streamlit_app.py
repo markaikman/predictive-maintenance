@@ -1,42 +1,63 @@
 import streamlit as st
 import pandas as pd
-from api_client import predict
-
-import requests
-import os
-
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+from api_client import list_engines, get_series, predict_latest
 
 st.set_page_config(page_title="Predictive Maintenance Demo", layout="wide")
-st.title("Predictive Maintenance — Demo Dashboard")
+st.title("Predictive Maintenance — Fleet Dashboard (FD001)")
+
+
+@st.cache_data(ttl=60)
+def cached_engines():
+    return list_engines()
+
+
+# Keep UI running if FastAPI not up, provide clear error log.
+try:
+    engines = cached_engines()
+except Exception as e:
+    st.error("API is not reachable yet. Is the FastAPI container running?")
+    st.exception(e)
+    st.stop()
 
 with st.sidebar:
-    if st.button("Test API"):
-        r = requests.get(f"{API_BASE_URL}/health", timeout=5)
-        st.write(r.json())
+    st.header("Select Engine")
+    engine_id = st.selectbox("Engine ID", engines, index=0)
 
-with st.sidebar:
-    st.header("Input")
-    engine_id = st.text_input("Engine ID", "Engine_12")
+    st.header("Series to Plot")
+    sensor_cols = [f"s{i}" for i in range(1, 22)]
+    cols = st.multiselect("Sensors", sensor_cols, default=["s2", "s3", "s4"])
 
+    st.header("Prediction Settings")
+    window = st.slider("Rolling window", min_value=3, max_value=50, value=10, step=1)
+
+    load = st.button("Load Series")
+    run_pred = st.button("Predict Latest Cycle")
+
+left, right = st.columns([2, 1], gap="large")
+
+if load:
+    rows = get_series(int(engine_id), cols=["cycle"] + cols)
+    df = pd.DataFrame(rows)
+
+    with left:
+        st.subheader(f"Engine {engine_id} — Sensor Time Series")
+        if df.empty:
+            st.warning("No data returned.")
+        else:
+            st.line_chart(df.set_index("cycle")[cols])
+
+    with right:
+        st.subheader("Latest Values")
+        st.dataframe(df.tail(1))
+
+if run_pred:
+    out = predict_latest(int(engine_id), window=int(window))
+
+    st.subheader("RUL Prediction (Latest Cycle)")
+    st.metric("Predicted RUL", f"{out['prediction_rul']:.2f}")
     st.caption(
-        "Add a few numeric features for now (we'll replace with real sensor-derived features)."
+        f"Engine: {out['engine_id']} | Cycle: {out['cycle']} | Window: {out['window']} | Model: {out['model_version']}"
     )
-    f1 = st.number_input("sensor_1", value=100.0)
-    f2 = st.number_input("sensor_2", value=0.25)
-    f3 = st.number_input("sensor_3", value=42.0)
-
-    run = st.button("Predict")
-
-if run:
-    features = {"sensor_1": f1, "sensor_2": f2, "sensor_3": f3}
-    out = predict(engine_id, features)
-
-    st.subheader("Prediction")
-    st.metric("Predicted risk / RUL proxy", f"{out['prediction']:.4f}")
-    st.caption(f"Model version: {out['model_version']}")
-
-    st.subheader("Features")
-    st.dataframe(pd.DataFrame([features]))
+    st.success("Prediction logged to Postgres (prediction_logs).")
 else:
-    st.info("Enter features in the sidebar and click **Predict**.")
+    st.info("Use the sidebar to **Load Series** and/or **Predict Latest Cycle**.")

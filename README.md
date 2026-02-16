@@ -30,6 +30,14 @@ Docker images use python:3.12-slim
 
 ---
 
+## Data
+
+This project uses the NASA C-MAPSS turbofan engine degradation dataset (FD001).
+
+Note: the data.nasa.gov listing may be unavailable at times. If so, use an alternative public mirror of the same C-MAPSS files (train_FD001.txt, test_FD001.txt, RUL_FD001.txt) and place them in `data/raw/`.
+
+---
+
 ## Getting Started
 
 ### 1. Clone the repository

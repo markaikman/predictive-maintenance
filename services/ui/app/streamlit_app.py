@@ -115,6 +115,11 @@ with tab_monitor:
 
             st.markdown("### Feature drift vs training (PSI)")
             drift = get_feature_drift(int(limit))
+            st.caption(
+                f"Drift status: ok={drift.get('ok')} all_count={drift.get('all_count')} window_n={drift.get('window_n')}"
+            )
+            if drift.get("error"):
+                st.warning(drift["error"])
             if not drift.get("ok"):
                 st.warning(drift.get("error", "Drift unavailable"))
             else:

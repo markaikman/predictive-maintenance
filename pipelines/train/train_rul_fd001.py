@@ -86,7 +86,9 @@ def register_model(
     name: str = "cmapss_fd001_rul",
     notes: str | None = None,
 ):
-    db_url = os.getenv("DATABASE_URL")
+    db_url = os.getenv(
+        "DATABASE_URL", "postgresql+psycopg2://dsuser:dsdevpass123@localhost:5432/dsdb"
+    )
     if not db_url:
         raise ValueError("DATABASE_URL env var required to register model")
     eng = create_engine(db_url)

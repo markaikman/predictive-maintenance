@@ -5,6 +5,7 @@ import json
 import joblib
 import numpy as np
 import pandas as pd
+from sqlalchemy import create_engine, text
 
 import mlflow
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -26,15 +27,16 @@ try:
 except Exception:
     LGBMRegressor = None
 
-
-from sqlalchemy import create_engine, text
-
 from pipelines.common.cmapss_fd001 import (
     load_cmapss_txt,
     add_rul_label,
     build_features,
     train_val_split_by_engine,
 )
+
+from dotenv import load_dotenv
+
+load_dotenv()  # loads .env from current working directory
 
 
 def compute_baseline_stats(
@@ -226,6 +228,10 @@ def main():
                     "R2": r2,
                 }
             )
+            results_df = pd.DataFrame(results).sort_values("RMSE")
+            leaderboard_path = repo_root / "artifacts" / "benchmark_leaderboard.csv"
+            results_df.to_csv(leaderboard_path, index=False)
+            mlflow.log_artifact(str(leaderboard_path), artifact_path="benchmark")
 
             if best is None or rmse < best[0]:
                 best = (rmse, run_id, model_key)

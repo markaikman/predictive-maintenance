@@ -83,8 +83,8 @@ pip install -r requirements-dev.txt
 
 ## Roadmap
 
-- [ ] Data ingestion + feature engineering
-- [ ] Baseline predictive model
+- [x] Data ingestion + feature engineering
+- [x] Baseline predictive model
 - [ ] PyTorch deep learning model
 - [ ] Monitoring & drift detection
 - [ ] RAG assistant with pgvector

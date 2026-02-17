@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 import os
 import joblib
+import json
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import mlflow
@@ -78,6 +79,44 @@ def build_features(
     return out, feature_cols
 
 
+def register_model(
+    run_id: str,
+    artifact_path: str,
+    stage: str = "dev",
+    name: str = "cmapss_fd001_rul",
+    notes: str | None = None,
+):
+    db_url = os.getenv(
+        "DATABASE_URL", "postgresql+psycopg2://dsuser:dsdevpass123@localhost:5432/dsdb"
+    )
+    if not db_url:
+        raise ValueError("DATABASE_URL env var required to register model")
+    eng = create_engine(db_url)
+
+    with eng.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE model_registry SET is_active = FALSE WHERE name = :name AND stage = :stage AND is_active = TRUE"
+            ),
+            {"name": name, "stage": stage},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO model_registry (name, stage, run_id, artifact_path, notes, is_active)
+                VALUES (:name, :stage, :run_id, :artifact_path, :notes, TRUE)
+            """
+            ),
+            {
+                "name": name,
+                "stage": stage,
+                "run_id": run_id,
+                "artifact_path": artifact_path,
+                "notes": notes,
+            },
+        )
+
+
 def train_val_split_by_engine(
     df: pd.DataFrame, val_frac: float = 0.2, seed: int = 42
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -123,6 +162,23 @@ def main() -> None:
     X_val = val_df[feature_cols].to_numpy(dtype=float)
     y_val = val_df["RUL"].to_numpy(dtype=float)
 
+    # Baseline stats for drift monitoring (training distribution)
+    baseline = {}
+    X_train_df = pd.DataFrame(X_train, columns=feature_cols)
+
+    for c in feature_cols:
+        s = X_train_df[c].astype(float)
+        # Robust percentiles to build bins later
+        baseline[c] = {
+            "p05": float(s.quantile(0.05)),
+            "p25": float(s.quantile(0.25)),
+            "p50": float(s.quantile(0.50)),
+            "p75": float(s.quantile(0.75)),
+            "p95": float(s.quantile(0.95)),
+            "mean": float(s.mean()),
+            "std": float(s.std(ddof=0)),
+        }
+
     model = RandomForestRegressor(
         n_estimators=300, random_state=42, n_jobs=-1, max_depth=None
     )
@@ -134,6 +190,9 @@ def main() -> None:
         mlflow.log_param("rolling_window", 10)
         mlflow.log_param("val_frac_by_engine", 0.2)
 
+        run_id = mlflow.active_run().info.run_id
+
+        # 1) Train + evaluate first
         model.fit(X_train, y_train)
         pred = model.predict(X_val)
 
@@ -146,19 +205,55 @@ def main() -> None:
         mlflow.log_metric("RMSE", rmse)
         mlflow.log_metric("R2", r2)
 
-        # Save bundle for API: includes feature order
+        # 2) Now build the bundle (model exists + feature order fixed)
         bundle = {"model": model, "feature_names": feature_cols}
 
         artifacts_dir = repo_root / "artifacts" / "models"
         artifacts_dir.mkdir(parents=True, exist_ok=True)
-        out_path = artifacts_dir / "model.pkl"
-        joblib.dump(bundle, out_path)
 
-        mlflow.log_artifact(str(out_path), artifact_path="model")
+        # 3) Save dev bundle (optional convenience)
+        dev_path = artifacts_dir / "model.pkl"
+        joblib.dump(bundle, dev_path)
 
-        print("Saved model bundle to:", out_path)
-        print(f"Val MAE={mae:.3f} RMSE={rmse:.3f} R2={r2:.3f}")
-        print("MLflow Tracking URI:", mlflow_uri)
+        # 4) Save run-specific bundle for promotion
+        runs_dir = artifacts_dir / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        run_bundle_path = runs_dir / f"{run_id}.pkl"
+        joblib.dump(bundle, run_bundle_path)
+
+        # 5) Save baseline stats next to the model artifacts
+        stats_path = artifacts_dir / "baseline_stats.json"
+        with open(stats_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "dataset": "FD001",
+                    "rolling_window": 10,
+                    "feature_names": feature_cols,
+                    "baseline": baseline,
+                    "run_id": run_id,
+                },
+                f,
+                indent=2,
+            )
+
+        # 6) Log artifacts to MLflow
+        mlflow.log_artifact(str(run_bundle_path), artifact_path="model_bundle")
+        mlflow.log_artifact(str(stats_path), artifact_path="model")
+
+        # 7) Register in Postgres as active DEV using a container-visible path
+        # IMPORTANT: store /artifacts/... not a Windows path
+        register_model(
+            run_id=run_id,
+            artifact_path=f"/artifacts/models/runs/{run_id}.pkl",
+            stage="dev",
+            name="cmapss_fd001_rul",
+            notes="RF baseline rm10",
+        )
+
+    print("Saved dev bundle to:", dev_path)
+    print("Saved run bundle to:", run_bundle_path)
+    print(f"Val MAE={mae:.3f} RMSE={rmse:.3f} R2={r2:.3f}")
+    print("MLflow Tracking URI:", mlflow_uri)
 
 
 if __name__ == "__main__":

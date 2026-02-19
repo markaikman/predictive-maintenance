@@ -8,3 +8,5 @@ joblib==1.4.2
 numpy==2.0.0
 pandas==2.2.2
 scikit-learn==1.8.0
+lightgbm
+xgboost

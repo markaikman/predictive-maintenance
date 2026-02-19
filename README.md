@@ -2,17 +2,18 @@
 
 An end-to-end predictive maintenance system built with:
 
-- FastAPI (inference service + model lifecycle API)
-- Streamlit (interactive dashboard + monitoring)
-- Postgres + pgvector (storage, registry, vector search ready)
-- MLflow (experiment tracking)
-- Docker Compose (container orchestration)
+- **FastAPI** (inference service + model lifecycle API)
+- **Streamlit** (interactive dashboard + monitoring)
+- **Postgres** + **pgvector** (storage, registry, vector search ready)
+- **MLflow** (experiment tracking)
+- **Docker Compose** (container orchestration)
 
 This project demonstrates:
 - Time-series feature engineering (rolling window statistics)
 - Remaining Useful Life (RUL) regression modeling
+- Structured model benchmarking across multiple splits and feature windows
 - ML experiment tracking (MLflow)
-- Model registry with staged promotion (dev → prod)
+- Model registry with staged promotion (`dev` → `prod`)
 - Secure model promotion via API
 - Live model reload without container restart
 - Prediction logging
@@ -23,14 +24,25 @@ This project demonstrates:
 ---
 
 ## Architecture
+```SCSS
+Streamlit (UI)
+      ↓
+FastAPI (Inference + Model Lifecycle API)
+      ↓
+Postgres (Prediction Logs + Model Registry)
+      ↑
+Training Pipeline → MLflow → Model Artifacts
+```
 
-Streamlit (UI) → FastAPI (Model Inference API) → Postgres  
-Training Pipeline → MLflow → Model Registry → Production Model
+The API always serves the active production model from:
+
+```bash
+/artifacts/models/production.pkl
+```
 
 All services run via Docker Compose.
-
-Python 3.12.x required
-Docker images use `python:3.12-slim`
+- Python 3.12.x required
+- Docker images use `python:3.12-slim`
 
 ---
 
@@ -55,7 +67,36 @@ Invoke-RestMethod http://localhost:8000/model/info
 `/artifacts/models/production.pkl`
 
 ---
+## Structured Model Benchmarking
+The benchmarking pipeline evaluates models across:  
+- Multiple rolling windows (e.g., 5, 10, 20, 30)
+- Multiple engine-level train/validation splits (different seeds)
+- Multiple model families:
+    - Ridge
+    - Random Forest
+    - Gradient Boosting
+    - HistGradientBoosting
+    - XGBoost
+    - LightGBM
 
+Models are ranked by: 
+- Mean RMSE across splits (primary)
+- Mean MAE (tie-breaker)
+
+```powershell
+$env:MLFLOW_TRACKING_URI="http://localhost:5000"
+$env:DATABASE_URL="postgresql+psycopg2://dsuser:password@localhost:5432/dsdb"
+
+python -m pipelines.benchmark.benchmark_fd001
+```
+Outputs:
+- Per-run leaderboard CSV
+- Aggregated leaderboard (mean/std metrics)
+- Summary JSON
+- MLflow runs for every model configuration
+- Automatic registration of best configuration as active `dev`
+
+---
 ## Monitoring
 The Streamlit dashboard includes a Monitoring tab showing:
 - Prediction volume over time
@@ -151,11 +192,10 @@ pip install -r requirements-dev.txt
 
 - [x] Data ingestion + feature engineering
 - [x] Baseline predictive model (RUL)
+- [x] Structured benchmarking framework (multi-window, multi-split)
 - [x] Model registry with staged promotion
 - [x] Monitoring + drift detection (PSI)
-- [ ] Structured model benchmarking framework
 - [ ] PyTorch deep learning sequence model (LSTM/TCN)
-- [ ] Monitoring & drift detection
 - [ ] RAG assistant with pgvector
 - [ ] Cloud deployment (AWS/Azure)
 

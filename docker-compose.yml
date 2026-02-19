@@ -64,6 +64,7 @@ services:
       - "${UI_PORT}:8501"
     environment:
       API_BASE_URL: http://api:8000
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
 
 volumes:
   postgres_data:

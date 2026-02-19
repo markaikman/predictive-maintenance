@@ -199,7 +199,7 @@ def model_promote(
     # 1) promote dev → prod in DB
     promoted = promote_dev_to_prod("cmapss_fd001_rul", notes=notes)
 
-    # 2) copy bundle to production.pkl
+    # 2a) copy bundle to production.pkl
     src = Path(promoted["artifact_path"])
     dst = Path(settings.production_model_path)
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -208,6 +208,12 @@ def model_promote(
             status_code=500, detail=f"Promoted artifact_path missing: {src}"
         )
     shutil.copyfile(src, dst)
+
+    # 2b) align monitoring baseline stats with the promoted model (if available)
+    stats_src = Path(f"/artifacts/models/baseline_stats_{promoted['run_id']}.json")
+    stats_dst = Path("/artifacts/models/baseline_stats.json")
+    if stats_src.exists():
+        shutil.copyfile(stats_src, stats_dst)
 
     # 3) reload model in memory
     bundle = load_bundle_from_path(str(dst))

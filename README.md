@@ -2,39 +2,142 @@
 
 An end-to-end predictive maintenance system built with:
 
-- FastAPI (inference service)
-- Streamlit (interactive dashboard)
-- Postgres + pgvector (storage + vector search)
-- MLflow (experiment tracking)
-- Docker Compose (container orchestration)
+- **FastAPI** (inference service + model lifecycle API)
+- **Streamlit** (interactive dashboard + monitoring)
+- **Postgres** + **pgvector** (storage, registry, vector search ready)
+- **MLflow** (experiment tracking)
+- **Docker Compose** (container orchestration)
 
 This project demonstrates:
-- Feature engineering from time-series data
-- Predictive modeling (regression/classification)
-- Model tracking and versioning
+- Time-series feature engineering (rolling window statistics)
+- Remaining Useful Life (RUL) regression modeling
+- Structured model benchmarking across multiple splits and feature windows
+- ML experiment tracking (MLflow)
+- Model registry with staged promotion (`dev` → `prod`)
+- Secure model promotion via API
+- Live model reload without container restart
+- Prediction logging
+- Feature drift detection (PSI)
 - Containerized deployment
-- Prediction logging and monitoring foundation
 - (Planned) Retrieval-Augmented Generation (RAG) assistant
 
 ---
 
 ## Architecture
+```SCSS
+Streamlit (UI)
+      ↓
+FastAPI (Inference + Model Lifecycle API)
+      ↓
+Postgres (Prediction Logs + Model Registry)
+      ↑
+Training Pipeline → MLflow → Model Artifacts
+```
 
-Streamlit (UI) → FastAPI (Model Inference API) → Postgres  
-Training Pipeline → MLflow → Model Artifacts → API loads latest model  
+The API always serves the active production model from:
+
+```bash
+/artifacts/models/production.pkl
+```
 
 All services run via Docker Compose.
-
-Python 3.12.x required
-Docker images use python:3.12-slim
+- Python 3.12.x required
+- Docker images use `python:3.12-slim`
 
 ---
 
+## Model Lifecycle
+This system supports staged model deployment:
+- `dev` – latest trained model
+- `prod` – actively served production model  
+Training automatically registers a model as active `dev`
+
+### Promote dev → prod
+```powershell
+$headers = @{ "X-API-KEY" = "your_admin_key" }
+Invoke-RestMethod -Method Post -Uri "http://localhost:8000/model/promote" -Headers $headers
+```
+
+### Check current model
+```powershell
+Invoke-RestMethod http://localhost:8000/model/info
+```
+
+#### The API always serves from:
+`/artifacts/models/production.pkl`
+
+---
+## Structured Model Benchmarking
+The benchmarking pipeline evaluates models across:  
+- Multiple rolling windows (e.g., 5, 10, 20, 30)
+- Multiple engine-level train/validation splits (different seeds)
+- Multiple model families:
+    - Ridge
+    - Random Forest
+    - Gradient Boosting
+    - HistGradientBoosting
+    - XGBoost
+    - LightGBM
+
+Models are ranked by: 
+- Mean RMSE across splits (primary)
+- Mean MAE (tie-breaker)
+
+```powershell
+$env:MLFLOW_TRACKING_URI="http://localhost:5000"
+$env:DATABASE_URL="postgresql+psycopg2://dsuser:password@localhost:5432/dsdb"
+
+python -m pipelines.benchmark.benchmark_fd001
+```
+Outputs:
+- Per-run leaderboard CSV
+- Aggregated leaderboard (mean/std metrics)
+- Summary JSON
+- MLflow runs for every model configuration
+- Automatic registration of best configuration as active `dev`
+
+---
+## Monitoring
+The Streamlit dashboard includes a Monitoring tab showing:
+- Prediction volume over time
+- Prediction distribution
+- Feature drift vs training baseline using Population Stability Index (PSI)
+
+PSI Interpretation:
+- < 0.10 → Low drift
+- 0.10–0.25 → Moderate drift
+- 0.25 → High drift
+
+Prediction logs are stored in Postges and analyzed in real time.
+___
+
 ## Data
 
-This project uses the NASA C-MAPSS turbofan engine degradation dataset (FD001).
+This project uses the [NASA C-MAPSS Jet Engine Simulated Degradation Dataset](https://data.nasa.gov/dataset/cmapss-jet-engine-simulated-data) (FD001).
 
-Note: the data.nasa.gov listing may be unavailable at times. If so, use an alternative public mirror of the same C-MAPSS files (train_FD001.txt, test_FD001.txt, RUL_FD001.txt) and place them in `data/raw/`.
+Note: If the official NASA listing is unavailable, use any public mirror of: 
+- `train_FD001.txt` 
+- `test_FD001.txt`
+- `RUL_FD001.txt`
+
+Place files in `data/raw/`.
+
+---
+
+## Training
+Train the baseline RUL model:
+```powershell
+$env:MLFLOW_TRACKING_URI="http://localhost:5000"
+$env:DATABASE_URL="postgresql+psycopg2://dsuser:password@localhost:5432/dsdb"
+
+python pipelines/train/train_rul_fd001.py
+```
+
+Training will:
+- Log metrics to MLflow
+- Save model bundle
+- Save basline drift statistics
+- Register the model as active `dev`
 
 ---
 
@@ -55,7 +158,11 @@ Copy the example file:
 cp .env.example .env
 ```
 
-Edit values if needed.
+Ensure `.env` contins:
+```ini
+DATABASE_URL=...
+ADMIN_API_KEY=...
+```
 
 ### 3. Start services
 
@@ -84,9 +191,11 @@ pip install -r requirements-dev.txt
 ## Roadmap
 
 - [x] Data ingestion + feature engineering
-- [x] Baseline predictive model
-- [ ] PyTorch deep learning model
-- [ ] Monitoring & drift detection
+- [x] Baseline predictive model (RUL)
+- [x] Structured benchmarking framework (multi-window, multi-split)
+- [x] Model registry with staged promotion
+- [x] Monitoring + drift detection (PSI)
+- [ ] PyTorch deep learning sequence model (LSTM/TCN)
 - [ ] RAG assistant with pgvector
 - [ ] Cloud deployment (AWS/Azure)
 

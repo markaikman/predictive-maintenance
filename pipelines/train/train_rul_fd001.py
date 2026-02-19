@@ -6,10 +6,11 @@ import joblib
 import json
 import numpy as np
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import mlflow
+from pipelines.db import get_engine
 
 
 def load_cmapss_txt(path: Path) -> pd.DataFrame:
@@ -35,12 +36,23 @@ def load_cmapss_txt(path: Path) -> pd.DataFrame:
 def write_train_to_postgres(
     raw: pd.DataFrame, table: str = "cmapss_fd001_train"
 ) -> None:
-    db_url = os.getenv(
-        "DATABASE_URL", "postgresql+psycopg2://dsuser:dsdevpass123@localhost:5432/dsdb"
-    )
-    eng = create_engine(db_url)
-    # replace on first run; later you can switch to "append" with upsert
+    # Defensive check: prevent accidental table wipe
+    if raw is None or raw.empty:
+        raise ValueError(
+            f"Refusing to write to '{table}': dataframe is empty or None. "
+            "This would replace the table with 0 rows."
+        )
+    # Optional sanity check for required columns
+    required_cols = {"engine_id", "cycle"}
+    missing = required_cols - set(raw.columns)
+    if missing:
+        raise ValueError(
+            f"Refusing to write to '{table}': missing required columns {missing}"
+        )
+    eng = get_engine()
+    print(f"Writing {len(raw)} rows to table '{table}'...")
     raw.to_sql(table, eng, if_exists="replace", index=False)
+    print(f"Successfully wrote {len(raw)} rows to '{table}'.")
 
 
 def add_rul_label(train_df: pd.DataFrame) -> pd.DataFrame:
@@ -86,12 +98,10 @@ def register_model(
     name: str = "cmapss_fd001_rul",
     notes: str | None = None,
 ):
-    db_url = os.getenv(
-        "DATABASE_URL", "postgresql+psycopg2://dsuser:dsdevpass123@localhost:5432/dsdb"
-    )
+    db_url = os.getenv("DATABASE_URL")
     if not db_url:
-        raise ValueError("DATABASE_URL env var required to register model")
-    eng = create_engine(db_url)
+        raise ValueError("DATABASE_URL env var is required (no hard-coded fallback).")
+    eng = get_engine()
 
     with eng.begin() as conn:
         conn.execute(

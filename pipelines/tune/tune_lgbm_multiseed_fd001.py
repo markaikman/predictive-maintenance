@@ -158,7 +158,7 @@ def main():
                 X_val = val_df[feature_cols].to_numpy(dtype=float)
                 y_val = val_df["RUL"].to_numpy(dtype=float)
 
-                model = LGBMRegressor(**params, random_state=42, n_jobs=-1)
+                model = LGBMRegressor(**params, n_jobs=-1)
                 model.fit(
                     X_train,
                     y_train,
@@ -205,7 +205,7 @@ def main():
             X_val = val_df[feature_cols].to_numpy(dtype=float)
             y_val = val_df["RUL"].to_numpy(dtype=float)
 
-            final_model = LGBMRegressor(**params, random_state=42, n_jobs=-1)
+            final_model = LGBMRegressor(**params, n_jobs=-1)
             final_model.fit(
                 X_train,
                 y_train,

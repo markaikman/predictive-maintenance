@@ -5,11 +5,12 @@ import os
 import json
 import joblib
 import numpy as np
+import pandas as pd
 
 import mlflow
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
-from lightgbm import LGBMRegressor
+from lightgbm import LGBMRegressor, early_stopping, log_evaluation
 
 from sqlalchemy import create_engine, text
 
@@ -26,6 +27,23 @@ def score(y_true, y_pred):
     rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
     r2 = float(r2_score(y_true, y_pred))
     return mae, rmse, r2
+
+
+def compute_baseline_stats(X_train: np.ndarray, feature_cols: list[str]) -> dict:
+    baseline = {}
+    X_train_df = pd.DataFrame(X_train, columns=feature_cols)
+    for c in feature_cols:
+        s = X_train_df[c].astype(float)
+        baseline[c] = {
+            "p05": float(s.quantile(0.05)),
+            "p25": float(s.quantile(0.25)),
+            "p50": float(s.quantile(0.50)),
+            "p75": float(s.quantile(0.75)),
+            "p95": float(s.quantile(0.95)),
+            "mean": float(s.mean()),
+            "std": float(s.std(ddof=0)),
+        }
+    return baseline
 
 
 def register_model(
@@ -77,6 +95,13 @@ def sample_params(rng: np.random.Generator) -> dict:
         "reg_alpha": reg_alpha,
         "reg_lambda": reg_lambda,
         "max_depth": int(rng.choice([-1, 4, 6, 8])),
+        # stability
+        "random_state": 42,
+        "bagging_seed": 42,
+        "feature_fraction_seed": 42,
+        "data_random_seed": 42,
+        "deterministic": True,
+        "force_col_wise": True,
     }
 
 
@@ -135,8 +160,19 @@ def main():
 
                 model = LGBMRegressor(**params, random_state=42, n_jobs=-1)
                 model.fit(
-                    X_train, y_train, eval_set=[(X_val, y_val)], eval_metric="rmse"
+                    X_train,
+                    y_train,
+                    eval_set=[(X_val, y_val)],
+                    eval_metric="rmse",
+                    callbacks=[
+                        early_stopping(stopping_rounds=200, first_metric_only=True),
+                        log_evaluation(period=0),
+                    ],
                 )
+                best_iter = int(
+                    getattr(model, "best_iteration_", params["n_estimators"])
+                )
+                mlflow.log_metric(f"best_iter_seed_{split_seed}", best_iter)
 
                 pred = model.predict(X_val)
                 mae, rmse, r2 = score(y_val, pred)
@@ -171,7 +207,18 @@ def main():
 
             final_model = LGBMRegressor(**params, random_state=42, n_jobs=-1)
             final_model.fit(
-                X_train, y_train, eval_set=[(X_val, y_val)], eval_metric="rmse"
+                X_train,
+                y_train,
+                eval_set=[(X_val, y_val)],
+                eval_metric="rmse",
+                callbacks=[
+                    early_stopping(stopping_rounds=200, first_metric_only=True),
+                    log_evaluation(period=0),
+                ],
+            )
+            mlflow.log_metric(
+                "best_iteration_final",
+                int(getattr(final_model, "best_iteration_", params["n_estimators"])),
             )
 
             bundle = {"model": final_model, "feature_names": feature_cols}
@@ -180,15 +227,17 @@ def main():
             mlflow.log_artifact(str(run_bundle_path), artifact_path="model_bundle")
 
             # Save baseline stats for this run
-            baseline = {
+            baseline_stats = compute_baseline_stats(X_train, feature_cols)
+            payload = {
                 "dataset": "FD001",
                 "rolling_window": window,
                 "feature_names": feature_cols,
+                "baseline": baseline_stats,
                 "run_id": run_id,
             }
             stats_path = artifacts_dir / f"baseline_stats_{run_id}.json"
             with open(stats_path, "w", encoding="utf-8") as f:
-                json.dump(baseline, f, indent=2)
+                json.dump(payload, f, indent=2)
             mlflow.log_artifact(str(stats_path), artifact_path="model")
 
             # Track best: mean RMSE primary, std RMSE secondary
@@ -196,8 +245,9 @@ def main():
                 best is None
                 or (rmse_mean < best[0])
                 or (rmse_mean == best[0] and rmse_std < best[1])
+                or (rmse_mean == best[0] and rmse_std == best[1] and r2_mean > best[2])
             ):
-                best = (rmse_mean, rmse_std, run_id, params)
+                best = (rmse_mean, rmse_std, r2_mean, run_id, params)
 
     if not best:
         raise RuntimeError("No trials completed")

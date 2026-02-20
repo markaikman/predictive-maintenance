@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Query, Header
+from contextlib import asynccontextmanager
 from pathlib import Path
 import shutil
 import numpy as np
@@ -12,7 +13,37 @@ from .features import build_features_for_engine
 from .monitoring import get_recent_prediction_logs, compute_feature_drift_psi
 from .model_loader import load_bundle_from_path
 
-app = FastAPI(title="Predictive Maintenance API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global current_loaded_run_id, current_model_source, model, feature_names
+
+    # 1) Load prod run_id from DB (source of truth)
+    try:
+        prod = get_active_model("cmapss_fd001_rul", "prod")
+        current_loaded_run_id = None if not prod else prod.get("run_id")
+    except Exception:
+        current_loaded_run_id = None
+
+    # 2) Optionally load production.pkl (if your app doesn't already do this elsewhere)
+    try:
+        p = Path(settings.production_model_path)
+        if p.exists():
+            bundle = load_bundle_from_path(str(p))
+            model = bundle["model"]
+            feature_names = bundle["feature_names"]
+            current_model_source = "production.pkl"
+    except Exception:
+        # Keep the API up even if model load fails (optional)
+        pass
+
+    yield
+
+    # Shutdown (nothing needed)
+
+
+app = FastAPI(title="Predictive Maintenance API", lifespan=lifespan)
 
 bundle = load_bundle_from_path(settings.production_model_path)
 model = bundle["model"]
@@ -20,6 +51,7 @@ feature_names = bundle["feature_names"]
 current_model_source = (
     "production.pkl" if Path(settings.production_model_path).exists() else "fallback"
 )
+current_loaded_run_id: str | None = None
 
 
 def _require_admin(x_api_key: str | None):
@@ -67,13 +99,25 @@ def engine_series(engine_id: int, cols: List[str] = Query(default=["s1", "s2", "
 
 @app.get("/model/info")
 def model_info():
-    prod = get_active_model("cmapss_fd001_rul", "prod")
-    dev = get_active_model("cmapss_fd001_rul", "dev")
+    prod = get_active_model("cmapss_fd001_rul", "prod") or {}
+    dev = get_active_model("cmapss_fd001_rul", "dev") or {}
+
+    prod_run_id = prod.get("run_id")
+    dev_run_id = dev.get("run_id")
+
     return {
         "loaded_from": current_model_source,
+        "loaded_run_id": current_loaded_run_id,
         "feature_names_count": 0 if not feature_names else len(feature_names),
         "feature_names_sample": [] if not feature_names else feature_names[:10],
         "registry": {"dev": dev, "prod": prod},
+        "registry_dev_run_id": dev_run_id,
+        "registry_prod_run_id": prod_run_id,
+        "loaded_matches_registry_prod": (
+            current_loaded_run_id is not None
+            and prod_run_id is not None
+            and current_loaded_run_id == prod_run_id
+        ),
     }
 
 
@@ -192,28 +236,33 @@ def model_reload(x_api_key: str | None = Header(default=None)):
 
 @app.post("/model/promote")
 def model_promote(
-    x_api_key: str | None = Header(default=None), notes: str | None = None
+    x_api_key: str | None = Header(default=None),
+    notes: str | None = None,
 ):
     _require_admin(x_api_key)
 
-    # 1) promote dev → prod in DB
+    # 1) promote dev → prod in DB (+ deactivate promoted dev row)
     promoted = promote_dev_to_prod("cmapss_fd001_rul", notes=notes)
 
-    # 2a) copy bundle to production.pkl
+    # 2) copy bundle to production.pkl
     src = Path(promoted["artifact_path"])
     dst = Path(settings.production_model_path)
     dst.parent.mkdir(parents=True, exist_ok=True)
+
     if not src.exists():
         raise HTTPException(
             status_code=500, detail=f"Promoted artifact_path missing: {src}"
         )
+
     shutil.copyfile(src, dst)
 
     # 2b) align monitoring baseline stats with the promoted model (if available)
     stats_src = Path(f"/artifacts/models/baseline_stats_{promoted['run_id']}.json")
     stats_dst = Path("/artifacts/models/baseline_stats.json")
+    baseline_copied = False
     if stats_src.exists():
         shutil.copyfile(stats_src, stats_dst)
+        baseline_copied = True
 
     # 3) reload model in memory
     bundle = load_bundle_from_path(str(dst))
@@ -222,10 +271,14 @@ def model_promote(
     feature_names = bundle["feature_names"]
     current_model_source = "production.pkl"
 
+    global current_loaded_run_id
+    current_loaded_run_id = promoted["run_id"]
+
     return {
         "ok": True,
         "promoted_run_id": promoted["run_id"],
         "production_path": str(dst),
+        "baseline_stats_copied": baseline_copied,
     }
 
 

@@ -30,21 +30,26 @@ def main():
 
     # <<< Paste your best params here >>>
     BEST_PARAMS = {
-        # example placeholders — replace with your actual best trial params
         "n_estimators": 20000,
-        "learning_rate": 0.03,
-        "num_leaves": 127,
-        "min_child_samples": 20,
-        "subsample": 0.85,
-        "colsample_bytree": 0.85,
-        "reg_alpha": 0.0,
+        "learning_rate": 0.02,
+        "num_leaves": 255,
+        "min_child_samples": 40,
+        "subsample": 0.8920258311276335,
+        "colsample_bytree": 0.725695252487153,
+        "reg_alpha": 0.001,
         "reg_lambda": 1.0,
-        "max_depth": -1,
+        "max_depth": 4,
+        # stability
+        "random_state": 42,
+        "bagging_seed": 42,
+        "feature_fraction_seed": 42,
+        "data_random_seed": 42,
+        "deterministic": True,
     }
 
     window = 30
-    val_frac = 0.2
-    seeds = [42, 123, 999]
+    val_frac = 0.3
+    seeds = [42, 123, 999, 2026, 777]
 
     raw = load_cmapss_txt(train_path)
     labeled = add_rul_label(raw)
@@ -81,8 +86,13 @@ def main():
         pred = model.predict(X_val)
         mae, rmse, r2 = score(y_val, pred)
 
-        rows.append({"seed": seed, "MAE": mae, "RMSE": rmse, "R2": r2})
-        print(f"seed={seed}  MAE={mae:.3f}  RMSE={rmse:.3f}  R2={r2:.3f}")
+        best_iter = int(getattr(model, "best_iteration_", BEST_PARAMS["n_estimators"]))
+        rows.append(
+            {"seed": seed, "best_iter": best_iter, "MAE": mae, "RMSE": rmse, "R2": r2}
+        )
+        print(
+            f"seed={seed} best_iter={best_iter}  MAE={mae:.3f}  RMSE={rmse:.3f}  R2={r2:.3f}"
+        )
 
     df = pd.DataFrame(rows)
     print("\nSummary:")
@@ -90,7 +100,7 @@ def main():
 
     out_dir = repo_root / "artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "validate_best_lgbm_w30.csv"
+    out_path = out_dir / f"validate_best_lgbm_w{window}_vf{val_frac}.csv"
     df.to_csv(out_path, index=False)
     print("\nSaved:", out_path)
 

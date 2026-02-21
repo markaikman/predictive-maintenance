@@ -14,23 +14,34 @@ def get_engine() -> Engine:
 
 
 def get_active_model(name: str, stage: str) -> dict | None:
-    eng = get_engine()
-    with eng.begin() as conn:
-        row = conn.execute(
-            text(
-                """
-                SELECT id, created_at, name, stage, run_id, artifact_path, notes
+    engine = get_engine()
+    with engine.begin() as conn:
+        row = (
+            conn.execute(
+                text(
+                    """
+                SELECT run_id, artifact_path, notes, created_at
                 FROM model_registry
-                WHERE name = :name AND stage = :stage AND is_active = TRUE
+                WHERE name = :name
+                  AND stage = :stage
+                  AND is_active = TRUE
                 ORDER BY created_at DESC
                 LIMIT 1
             """
-            ),
-            {"name": name, "stage": stage},
-        ).fetchone()
+                ),
+                {"name": name, "stage": stage},
+            )
+            .mappings()
+            .first()
+        )
+
     if not row:
         return None
-    return dict(row._mapping)
+
+    d = dict(row)
+    if d.get("created_at") is not None:
+        d["created_at"] = d["created_at"].isoformat()
+    return d
 
 
 def log_prediction(
@@ -55,32 +66,54 @@ def log_prediction(
 
 
 def promote_dev_to_prod(name: str, notes: str | None = None) -> dict:
+    """
+    Promote the currently-active dev row to prod.
+    Ensures:
+      - exactly one active prod row
+      - dev row that was promoted becomes inactive
+    Returns dict with promoted run_id + artifact_path.
+    """
     eng = get_engine()
     with eng.begin() as conn:
-        dev = conn.execute(
-            text(
-                """
+        # 1) fetch active dev
+        dev = (
+            conn.execute(
+                text(
+                    """
                 SELECT id, run_id, artifact_path, notes
                 FROM model_registry
                 WHERE name = :name AND stage = 'dev' AND is_active = TRUE
                 ORDER BY created_at DESC
                 LIMIT 1
             """
-            ),
-            {"name": name},
-        ).fetchone()
-        if not dev:
-            raise RuntimeError("No active dev model to promote")
+                ),
+                {"name": name},
+            )
+            .mappings()
+            .first()
+        )
 
-        # deactivate existing prod
+        if not dev:
+            raise ValueError(f"No active dev model found for name={name}")
+
+        run_id = dev["run_id"]
+        artifact_path = dev["artifact_path"]
+        dev_notes = dev.get("notes")
+
+        # 2) deactivate current active prod
         conn.execute(
             text(
-                "UPDATE model_registry SET is_active = FALSE WHERE name = :name AND stage = 'prod' AND is_active = TRUE"
+                """
+                UPDATE model_registry
+                SET is_active = FALSE
+                WHERE name = :name AND stage = 'prod' AND is_active = TRUE
+            """
             ),
             {"name": name},
         )
 
-        # insert new prod row
+        # 3) insert new prod row (active)
+        combined_notes = notes if notes is not None else dev_notes
         conn.execute(
             text(
                 """
@@ -90,12 +123,22 @@ def promote_dev_to_prod(name: str, notes: str | None = None) -> dict:
             ),
             {
                 "name": name,
-                "run_id": dev._mapping["run_id"],
-                "artifact_path": dev._mapping["artifact_path"],
-                "notes": notes or dev._mapping.get("notes"),
+                "run_id": run_id,
+                "artifact_path": artifact_path,
+                "notes": combined_notes,
             },
         )
-        return {
-            "run_id": dev._mapping["run_id"],
-            "artifact_path": dev._mapping["artifact_path"],
-        }
+
+        # 4) deactivate the dev row that was promoted
+        conn.execute(
+            text(
+                """
+                UPDATE model_registry
+                SET is_active = FALSE
+                WHERE id = :id
+            """
+            ),
+            {"id": dev["id"]},
+        )
+
+    return {"run_id": run_id, "artifact_path": artifact_path, "notes": combined_notes}

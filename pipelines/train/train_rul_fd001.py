@@ -128,7 +128,7 @@ def register_model(
 
 
 def train_val_split_by_engine(
-    df: pd.DataFrame, val_frac: float = 0.2, seed: int = 42
+    df: pd.DataFrame, val_frac: float = 0.3, seed: int = 42
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     engines = df["engine_id"].unique()
     rng = np.random.default_rng(seed)

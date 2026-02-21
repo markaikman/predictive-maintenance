@@ -59,6 +59,11 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8000/model/promote" -Heade
 ```
 
 ### Check current model
+`/model/info` reports:
+- `loaded_run_id`
+- `registry_prod_run_id`
+- `loaded_matches_registry_prod`  
+This confirms the API is serving the active production run.
 ```powershell
 Invoke-RestMethod http://localhost:8000/model/info
 ```
@@ -108,7 +113,8 @@ PSI Interpretation:
 - 0.10–0.25 → Moderate drift
 - 0.25 → High drift
 
-Prediction logs are stored in Postges and analyzed in real time.
+Prediction logs are stored in Postgres and analyzed in real time.  
+Baseline stats are versioned by `run_id` and aligned at promotion.
 ___
 
 ## Data
@@ -138,6 +144,35 @@ Training will:
 - Save model bundle
 - Save basline drift statistics
 - Register the model as active `dev`
+
+---
+
+## Model Benchmarking & Tuning
+This repo includes scripts to compare models and tune LightGBM with robust multi-seed evaluation.
+
+### Validate current best LightGBM params (multi-seed)
+Runs the tuned parameter set across multiple engine-based train/val splits to measure stability.
+
+```powershell
+python pipelines/validate/validate_best_lgbm_fd001.py
+```
+
+Outputs a CSV to `artifacts/` and prints mean/std across seeds.
+
+### Multi-seed LightGBM tuning
+Searches hyparparameters and selects teh best trial by:
+1. lowest `RMSE_mean`
+2. lowest `RMSE_std` (tie-break)
+
+```powershell
+$env:N_TRIALS="40"
+$env:MLFLOW_TRACKING_URI="http://localhost:5000"
+$env:DATABASE_URL="postgresql+psycopg2://maikman:password@localhost:5432/dsdb"
+python -m pipelines.tune.tune_lgbm_multiseed_fd001
+```
+
+The best run is registered as active `dev`. Promote via the API when ready:  
+`POST /model/promote`
 
 ---
 
@@ -195,6 +230,7 @@ pip install -r requirements-dev.txt
 - [x] Structured benchmarking framework (multi-window, multi-split)
 - [x] Model registry with staged promotion
 - [x] Monitoring + drift detection (PSI)
+- [x] Hyperparameter tuning with multi-seed evaluation (LightGBM)
 - [ ] PyTorch deep learning sequence model (LSTM/TCN)
 - [ ] RAG assistant with pgvector
 - [ ] Cloud deployment (AWS/Azure)

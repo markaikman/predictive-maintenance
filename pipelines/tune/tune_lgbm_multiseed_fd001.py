@@ -78,10 +78,9 @@ def register_model(
 
 
 def sample_params(rng: np.random.Generator) -> dict:
-    # tighter, more robust search space
-    lr = float(rng.choice([0.01, 0.02, 0.03]))
-    num_leaves = int(rng.choice([31, 63, 127]))
-    min_child = int(rng.choice([40, 80, 120, 160, 200]))
+    lr = float(rng.choice([0.01, 0.02, 0.03, 0.05]))
+    num_leaves = int(rng.choice([31, 63, 127, 255]))
+    min_child = int(rng.choice([20, 40, 80, 120]))
     reg_lambda = float(rng.choice([1.0, 2.0, 5.0, 10.0, 20.0]))
     reg_alpha = float(rng.choice([0.0, 1e-3, 1e-2, 1e-1]))
 
@@ -90,11 +89,11 @@ def sample_params(rng: np.random.Generator) -> dict:
         "learning_rate": lr,
         "num_leaves": num_leaves,
         "min_child_samples": min_child,
-        "subsample": float(rng.uniform(0.7, 1.0)),
-        "colsample_bytree": float(rng.uniform(0.7, 1.0)),
+        "subsample": float(rng.uniform(0.6, 1.0)),
+        "colsample_bytree": float(rng.uniform(0.6, 1.0)),
         "reg_alpha": reg_alpha,
         "reg_lambda": reg_lambda,
-        "max_depth": int(rng.choice([-1, 4, 6, 8])),
+        "max_depth": int(rng.choice([-1, 4, 6, 8, 10])),
         # stability
         "random_state": 42,
         "bagging_seed": 42,
@@ -116,9 +115,9 @@ def main():
     mlflow.set_experiment("cmapss_rul_fd001_tuning_multiseed")
 
     window = 30
-    val_frac = 0.2
-    seeds = [42, 123, 999]
-    n_trials = int(os.getenv("N_TRIALS", "40"))
+    val_frac = 0.3
+    seeds = [42, 123, 999, 2026, 777]
+    n_trials = int(os.getenv("N_TRIALS", "1"))
 
     artifacts_dir = repo_root / "artifacts" / "models"
     runs_dir = artifacts_dir / "runs"
@@ -128,14 +127,35 @@ def main():
     raw = load_cmapss_txt(train_path)
     labeled = add_rul_label(raw)
     feat_df, feature_cols = build_features(labeled, window=window)
+    print("len labeled:", len(labeled), "len feat_df:", len(feat_df))
+    assert len(feat_df) == len(labeled), "Row mismatch: features and labels not aligned"
+    assert (feat_df["engine_id"].values == labeled["engine_id"].values).all()
+    assert (feat_df["cycle"].values == labeled["cycle"].values).all()
     feat_df["RUL"] = labeled["RUL"].values
 
     rng = np.random.default_rng(2026)
 
-    best = None  # (rmse_mean, rmse_std, run_id)
+    best = None  # (rmse_mean, rmse_std, r2_mean, run_id, params)
 
     for t in range(n_trials):
         params = sample_params(rng)
+        # params = {
+        #     "n_estimators": 20000,
+        #     "learning_rate": 0.05,
+        #     "num_leaves": 255,
+        #     "min_child_samples": 20,
+        #     "subsample": 0.9760451609130898,
+        #     "colsample_bytree": 0.6347532221092745,
+        #     "max_depth": 6,
+        #     "reg_alpha": 0.0,
+        #     "reg_lambda": 5.0,
+        #     "random_state": 42,
+        #     "bagging_seed": 42,
+        #     "feature_fraction_seed": 42,
+        #     "data_random_seed": 42,
+        #     "deterministic": True,
+        #     "force_col_wise": True,
+        # }
 
         with mlflow.start_run(run_name=f"lgbm_ms_w{window}_t{t+1}"):
             mlflow.log_param("dataset", "FD001")
@@ -252,9 +272,9 @@ def main():
     if not best:
         raise RuntimeError("No trials completed")
 
-    best_rmse_mean, best_rmse_std, best_run_id, best_params = best
+    best_rmse_mean, best_rmse_std, best_r2_mean, best_run_id, best_params = best
     print(
-        f"Best trial: run_id={best_run_id} RMSE_mean={best_rmse_mean:.4f} RMSE_std={best_rmse_std:.4f}"
+        f"Best trial: run_id={best_run_id} RMSE_mean={best_rmse_mean:.4f} RMSE_std={best_rmse_std:.4f} R2_mean={best_r2_mean:.4f}"
     )
 
     if os.getenv("DATABASE_URL"):

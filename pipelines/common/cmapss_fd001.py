@@ -33,22 +33,39 @@ def build_features(
     df: pd.DataFrame, window: int = 10
 ) -> tuple[pd.DataFrame, list[str]]:
     base_cols = [f"setting_{i}" for i in range(1, 4)] + [f"s{i}" for i in range(1, 22)]
+    sensors = [f"s{i}" for i in range(1, 22)]
+
     out = df[["engine_id", "cycle"] + base_cols].copy()
 
-    for c in [f"s{i}" for i in range(1, 22)]:
+    g = df.groupby("engine_id", sort=False)
+
+    # Lifecycle position features
+    out["cycle_norm"] = out["cycle"] / out.groupby("engine_id")["cycle"].transform(
+        "max"
+    )
+
+    for c in sensors:
+        # Rolling mean
         out[f"{c}_rm{window}"] = (
-            df.groupby("engine_id")[c]
+            g[c]
             .rolling(window=window, min_periods=1)
             .mean()
             .reset_index(level=0, drop=True)
         )
+
+        # Rolling std
         out[f"{c}_rs{window}"] = (
-            df.groupby("engine_id")[c]
+            g[c]
             .rolling(window=window, min_periods=1)
             .std()
             .fillna(0.0)
             .reset_index(level=0, drop=True)
         )
+
+        # Rolling slope (window-delta approximation)
+        out[f"{c}_slope{window}"] = (
+            (g[c].shift(0) - g[c].shift(window)) / float(window)
+        ).fillna(0.0)
 
     feature_cols = [c for c in out.columns if c not in ("engine_id", "cycle")]
     return out, feature_cols

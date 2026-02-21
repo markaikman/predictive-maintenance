@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from lightgbm import LGBMRegressor
+from lightgbm import LGBMRegressor, early_stopping, log_evaluation
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from pipelines.common.cmapss_fd001 import (
@@ -49,6 +49,10 @@ def main():
     raw = load_cmapss_txt(train_path)
     labeled = add_rul_label(raw)
     feat_df, feature_cols = build_features(labeled, window=window)
+    print("len labeled:", len(labeled), "len feat_df:", len(feat_df))
+    assert len(feat_df) == len(labeled), "Row mismatch: features and labels not aligned"
+    assert (feat_df["engine_id"].values == labeled["engine_id"].values).all()
+    assert (feat_df["cycle"].values == labeled["cycle"].values).all()
     feat_df["RUL"] = labeled["RUL"].values
 
     rows = []
@@ -62,8 +66,17 @@ def main():
         X_val = val_df[feature_cols].to_numpy(dtype=float)
         y_val = val_df["RUL"].to_numpy(dtype=float)
 
-        model = LGBMRegressor(**BEST_PARAMS, random_state=42, n_jobs=-1)
-        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], eval_metric="rmse")
+        model = LGBMRegressor(**BEST_PARAMS, n_jobs=-1)
+        model.fit(
+            X_train,
+            y_train,
+            eval_set=[(X_val, y_val)],
+            eval_metric="rmse",
+            callbacks=[
+                early_stopping(stopping_rounds=200, first_metric_only=True),
+                log_evaluation(period=0),
+            ],
+        )
 
         pred = model.predict(X_val)
         mae, rmse, r2 = score(y_val, pred)

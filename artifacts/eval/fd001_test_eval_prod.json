@@ -1,0 +1,17 @@
+{
+  "dataset": "FD001",
+  "model_artifact": "C:\\Users\\Mark\\Documents\\Mark\\predictive-maintenance\\artifacts\\models\\production.pkl",
+  "window_inferred": 30,
+  "n_rows_test": 13096,
+  "n_engines_test": 100,
+  "overall_all_rows": {
+    "MAE": 34.63319451406866,
+    "RMSE": 45.41061426987506,
+    "R2": 0.4071610895431136
+  },
+  "last_cycle_per_engine": {
+    "MAE": 39.22529513459377,
+    "RMSE": 47.718368656132846,
+    "R2": -0.31859562945725717
+  }
+}

@@ -174,6 +174,34 @@ python -m pipelines.tune.tune_lgbm_multiseed_fd001
 The best run is registered as active `dev`. Promote via the API when ready:  
 `POST /model/promote`
 
+- A PyTorch LSTM sequence model is implemented and benchmarked, but LightGBM remains the strongest baseline on FD001.
+
+---
+
+## Test-Set Holdout Evaluation (FD001)
+
+This repo supports evaluation on the official FD001 test split using:
+- `test_FD001.txt` (truncated runs)
+- `RUL_FD001.txt` (RUL at the final cycle per engine)
+
+True per-row RUL is computed as:
+`RUL_true = RUL_last(engine) + (max_cycle(engine) - cycle)`
+
+Run evaluation against the currently deployed production bundle:
+
+```powershell
+python -m pipelines.eval.eval_test_fd001
+```
+
+Outputs a JSON report to: 
+`artifacts/eval/fd001_test_eval_prod.json`
+
+The report includes metrics for: 
+- Metrics across all test rows (all timesteps)
+- Metrics on the last available cycle per engine (operationally realistic)
+
+Note: test-set performance can differ from internal multi-seed validation due to distribution differences between the official train/test engine sets.
+
 ---
 
 ## Getting Started

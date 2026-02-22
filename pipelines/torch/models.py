@@ -8,9 +8,9 @@ class LSTMRegressor(nn.Module):
     def __init__(
         self,
         n_features: int,
-        hidden_size: int = 64,
+        hidden_size: int = 128,
         num_layers: int = 2,
-        dropout: float = 0.2,
+        dropout: float = 0.3,
     ):
         super().__init__()
         self.lstm = nn.LSTM(

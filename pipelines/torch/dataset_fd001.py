@@ -118,11 +118,21 @@ def build_dataloaders(
     train_scaled = train_df.copy()
     val_scaled = val_df.copy()
 
-    train_scaled.loc[:, feature_cols] = _apply_standardizer(
-        train_scaled[feature_cols].to_numpy(dtype=np.float32), mean, std
+    # Force feature columns to float BEFORE scaling
+    train_scaled[feature_cols] = train_scaled[feature_cols].astype(np.float32)
+    val_scaled[feature_cols] = val_scaled[feature_cols].astype(np.float32)
+
+    # Apply standardization
+    train_scaled[feature_cols] = _apply_standardizer(
+        train_scaled[feature_cols].to_numpy(dtype=np.float32),
+        mean,
+        std,
     )
-    val_scaled.loc[:, feature_cols] = _apply_standardizer(
-        val_scaled[feature_cols].to_numpy(dtype=np.float32), mean, std
+
+    val_scaled[feature_cols] = _apply_standardizer(
+        val_scaled[feature_cols].to_numpy(dtype=np.float32),
+        mean,
+        std,
     )
 
     Xtr, ytr = make_sequences(train_scaled, feature_cols, cfg.seq_len)

@@ -31,15 +31,19 @@ def score(y_true: np.ndarray, y_pred: np.ndarray):
 
 
 def build_sequence_features(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
-    """
-    For LSTM we start with per-cycle raw signals + cycle_norm.
-    Uses settings + sensors + cycle_norm.
-    """
     base_cols = [f"setting_{i}" for i in range(1, 4)] + [f"s{i}" for i in range(1, 22)]
+    sensors = [f"s{i}" for i in range(1, 22)]
+
     out = df[["engine_id", "cycle"] + base_cols].copy()
-    out["cycle_norm"] = out["cycle"] / out.groupby("engine_id")["cycle"].transform(
-        "max"
-    )
+
+    # Safe time index feature
+    out["cycle_feat"] = out["cycle"].astype(float)
+
+    # Safe deltas (use only past)
+    g = out.groupby("engine_id", sort=False)
+    for c in sensors:
+        out[f"{c}_d1"] = g[c].diff().fillna(0.0)
+
     feature_cols = [c for c in out.columns if c not in ("engine_id", "cycle")]
     return out, feature_cols
 
@@ -161,8 +165,8 @@ def main():
     val_frac = float(os.getenv("VAL_FRAC", "0.3"))
     seeds = [42, 123, 999, 2026, 777]
 
-    max_epochs = int(os.getenv("EPOCHS", "25"))
-    patience = int(os.getenv("PATIENCE", "4"))
+    max_epochs = int(os.getenv("EPOCHS", "35"))
+    patience = int(os.getenv("PATIENCE", "6"))
     lr = float(os.getenv("LR", "0.001"))
     batch_size = int(os.getenv("BATCH_SIZE", "256"))
     hidden_size = int(os.getenv("HIDDEN_SIZE", "64"))

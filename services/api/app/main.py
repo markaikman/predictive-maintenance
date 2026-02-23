@@ -12,6 +12,7 @@ from .cmapss import list_engines, get_engine_series
 from .features import build_features_for_engine
 from .monitoring import get_recent_prediction_logs, compute_feature_drift_psi
 from .model_loader import load_bundle_from_path
+from .rag import router as rag_router
 
 
 @asynccontextmanager
@@ -44,6 +45,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Predictive Maintenance API", lifespan=lifespan)
+
+app.include_router(rag_router)
 
 bundle = load_bundle_from_path(settings.production_model_path)
 model = bundle["model"]

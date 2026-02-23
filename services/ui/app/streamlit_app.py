@@ -7,10 +7,11 @@ from api_client import (
     get_prediction_logs,
     get_feature_drift,
 )
+from rag_client import rag_search
 
 st.set_page_config(page_title="Predictive Maintenance Demo", layout="wide")
 st.title("Predictive Maintenance — Fleet Dashboard (FD001)")
-tab_fleet, tab_monitor = st.tabs(["Fleet", "Monitoring"])
+tab_fleet, tab_monitor, tab_assistant = st.tabs(["Fleet", "Monitoring", "Assistant"])
 
 
 @st.cache_data(ttl=60)
@@ -131,3 +132,20 @@ with tab_monitor:
     except Exception as e:
         st.error("Monitoring API not reachable or returned an error.")
         st.exception(e)
+
+with tab_assistant:
+    st.subheader("Assistant (Retrieval-only)")
+    q = st.text_input(
+        "Ask about the project, models, monitoring, or eval results",
+        value="What model is currently in production?",
+    )
+    k = st.slider("Top K", min_value=3, max_value=15, value=8)
+
+    if st.button("Search"):
+        out = rag_search(q, k=k)
+        st.write(f"Query: {out['query']}")
+        for i, r in enumerate(out["results"], start=1):
+            st.markdown(
+                f"**{i}. {r['title']}**  \nSource: `{r['source']}`  | Similarity: `{float(r['similarity']):.3f}`  \nURI: `{r.get('uri','')}`"
+            )
+            st.code(r["content"][:1200])

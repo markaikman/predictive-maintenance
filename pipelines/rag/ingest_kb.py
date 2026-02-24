@@ -56,10 +56,10 @@ def collect_db_snapshot_docs(eng) -> list[Doc]:
             conn.execute(
                 text(
                     """
-                SELECT stage, run_id, notes, artifact_path, created_at
+                SELECT stage, run_id, is_active, notes, created_at
                 FROM model_registry
-                WHERE name = 'cmapss_fd001_rul' AND is_active = TRUE
-                ORDER BY stage
+                WHERE name='cmapss_fd001_rul' AND is_active=TRUE AND stage IN ('dev','prod')
+                ORDER BY stage;
                 """
                 )
             )

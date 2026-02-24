@@ -19,6 +19,18 @@ def _openai_client() -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
+def _dedupe_citations(cites: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen = set()
+    out = []
+    for c in cites:
+        key = (c.get("source"), c.get("uri"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(c)
+    return out
+
+
 def _format_context(
     results: list[dict[str, Any]], max_chars: int = 12000
 ) -> tuple[str, list[dict[str, Any]]]:
@@ -29,6 +41,11 @@ def _format_context(
     parts: list[str] = []
     cites: list[dict[str, Any]] = []
     total = 0
+
+    # prevent model from contradicting itself w/ "active snapshot wins" rule
+    has_active = any(r.get("uri") == "db://model_registry/active" for r in results)
+    if has_active:
+        results = [r for r in results if r.get("uri") != "db://model_registry/history"]
 
     for i, r in enumerate(results, start=1):
         tag = f"S{i}"
@@ -54,6 +71,8 @@ def _format_context(
                 "score": r.get("score"),
             }
         )
+        cites = _dedupe_citations(cites)
+        cites = cites[:5]  # cap at 5 for
 
     return "\n---\n".join(parts), cites
 
@@ -89,6 +108,7 @@ def rag_answer(
         "Answer the user's question using ONLY the provided CONTEXT.\n"
         "If the answer is not in the context, say you don't know.\n"
         "Cite sources inline like [S1], [S2] using the tags provided.\n"
+        "If a source has uri starting with 'db://model_registry/active', treat it as authoritative.\n"
         "Keep it concise and practical."
     )
 

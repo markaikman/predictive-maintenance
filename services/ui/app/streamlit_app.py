@@ -7,7 +7,7 @@ from api_client import (
     get_prediction_logs,
     get_feature_drift,
 )
-from rag_client import rag_search
+from rag_client import rag_search, rag_answer
 
 st.set_page_config(page_title="Predictive Maintenance Demo", layout="wide")
 st.title("Predictive Maintenance — Fleet Dashboard (FD001)")
@@ -149,3 +149,25 @@ with tab_assistant:
                 f"**{i}. {r['title']}**  \nSource: `{r['source']}`  | Similarity: `{float(r['similarity']):.3f}`  \nURI: `{r.get('uri','')}`"
             )
             st.code(r["content"][:1200])
+
+    if st.button("Answer"):
+        out = rag_answer(q, k=k)
+
+        # out should look like:
+        # { "query": "...", "k": 5, "answer": "...", "citations": [ { "tag": "S1", "title": "...", "uri": "...", ... }, ... ] }
+
+        st.write(f"Query: {out.get('query', q)}")
+        st.markdown("### Answer")
+        st.write(out.get("answer", ""))
+
+        cites = out.get("citations", [])
+        if cites:
+            st.markdown("### Citations")
+            for c in cites:
+                tag = c.get("tag") or c.get("id") or "S?"
+                title = c.get("title", "")
+                uri = c.get("uri", "")
+                source = c.get("source", "")
+                st.markdown(
+                    f"- **[{tag}]** {title}  \n  Source: `{source}`  \n  URI: `{uri}`"
+                )

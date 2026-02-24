@@ -19,7 +19,8 @@ def _get_embedder() -> SentenceTransformer:
 
 
 def _pg_vector_literal(v: np.ndarray) -> str:
-    return "[" + ",".join(f"{x:.6f}" for x in v.tolist()) + "]"
+    # pgvector accepts text literal like: [0.123, -0.456, ...]
+    return "[" + ",".join(f"{float(x):.6f}" for x in v.tolist()) + "]"
 
 
 SQL_HYBRID = text(
@@ -30,16 +31,58 @@ SQL_HYBRID = text(
         d.source,
         d.uri,
         c.content,
+
+        -- vector similarity (cosine distance via <=>, convert to similarity)
         (1 - (c.embedding <=> :q_emb)) AS similarity,
-        ts_rank(c.content_tsv, websearch_to_tsquery('english', :q_txt)) AS kw_rank,
-        CASE WHEN d.source = 'db' THEN 0.08 ELSE 0 END AS src_boost,
+
+        -- keyword rank (FTS)
+        ts_rank(
+            c.content_tsv,
+            websearch_to_tsquery('english', :q_txt)
+        ) AS kw_rank,
+
+        -- general source boost
+        CASE
+            WHEN d.source = 'db' THEN 0.08
+            ELSE 0
+        END AS src_boost,
+
+        -- strong boost for the authoritative "active" snapshot
+        CASE
+            WHEN d.uri = 'db://model_registry/active' THEN 0.40
+            ELSE 0
+        END AS active_boost,
+
+        -- optional penalty so history doesn't crowd out the active snapshot
+        CASE
+            WHEN d.uri = 'db://model_registry/history' THEN -0.10
+            ELSE 0
+        END AS history_penalty,
+
+        -- final combined score
         (
-          (1 - (c.embedding <=> :q_emb))
-          + 0.15 * ts_rank(c.content_tsv, websearch_to_tsquery('english', :q_txt))
-          + CASE WHEN d.source = 'db' THEN 0.08 ELSE 0 END
+            (1 - (c.embedding <=> :q_emb))
+            + 0.15 * ts_rank(
+                c.content_tsv,
+                websearch_to_tsquery('english', :q_txt)
+            )
+            + CASE
+                WHEN d.source = 'db' THEN 0.08
+                ELSE 0
+              END
+            + CASE
+                WHEN d.uri = 'db://model_registry/active' THEN 0.40
+                ELSE 0
+              END
+            + CASE
+                WHEN d.uri = 'db://model_registry/history' THEN -0.10
+                ELSE 0
+              END
         ) AS score
+
     FROM rag_chunks c
     JOIN rag_documents d ON d.id = c.document_id
+
     ORDER BY score DESC
     LIMIT :k;
     """

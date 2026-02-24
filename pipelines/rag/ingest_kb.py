@@ -48,6 +48,69 @@ def read_text_file(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
+def collect_db_snapshot_docs(eng) -> list[Doc]:
+    docs: list[Doc] = []
+    with eng.begin() as conn:
+        # Active dev/prod for your main model
+        rows = (
+            conn.execute(
+                text(
+                    """
+                SELECT stage, run_id, notes, artifact_path, created_at
+                FROM model_registry
+                WHERE name = 'cmapss_fd001_rul' AND is_active = TRUE
+                ORDER BY stage
+                """
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+        content = {
+            "name": "cmapss_fd001_rul",
+            "active": [dict(r) for r in rows],
+        }
+        docs.append(
+            Doc(
+                source="db",
+                title="Model Registry Snapshot (active dev/prod)",
+                uri="db://model_registry/active",
+                content=json.dumps(content, indent=2, default=str),
+                metadata={"type": "model_registry_snapshot"},
+            )
+        )
+
+        # Recent promotions/history (last 20 rows)
+        hist = (
+            conn.execute(
+                text(
+                    """
+                SELECT stage, run_id, is_active, notes, artifact_path, created_at
+                FROM model_registry
+                WHERE name = 'cmapss_fd001_rul'
+                ORDER BY created_at DESC
+                LIMIT 20
+                """
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+        docs.append(
+            Doc(
+                source="db",
+                title="Model Registry History (last 20)",
+                uri="db://model_registry/history",
+                content=json.dumps([dict(r) for r in hist], indent=2, default=str),
+                metadata={"type": "model_registry_history"},
+            )
+        )
+
+    return docs
+
+
 def collect_sources(repo_root: Path) -> list[Doc]:
     docs: list[Doc] = []
 
@@ -198,6 +261,9 @@ def main():
     model = SentenceTransformer(MODEL_NAME)
 
     eng = create_engine(db_url, pool_pre_ping=True)
+
+    db_docs = collect_db_snapshot_docs(eng)
+    docs.extend(db_docs)
 
     total_chunks = 0
     for doc in docs:
